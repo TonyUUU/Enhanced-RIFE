@@ -8,7 +8,7 @@ import numpy as np
 import random
 import argparse
 
-from model.RIFE import Model
+from train_log.RIFE_HDv3 import Model
 from dataset import *
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
@@ -36,7 +36,7 @@ def flow2rgb(flow_map_np):
     rgb_map[:, :, 2] += normalized_flow_map[:, :, 1]
     return rgb_map.clip(0, 1)
 
-def train(model, local_rank):
+def train(model, local_rank, colab=False, data_folder=None):
     if local_rank == 0:
         writer = SummaryWriter('train')
         writer_val = SummaryWriter('validate')
@@ -45,11 +45,11 @@ def train(model, local_rank):
         writer_val = None
     step = 0
     nr_eval = 0
-    dataset = VimeoDataset('train')
+    dataset = VimeoDataset('train', colab=colab, data_folder=data_folder)
     sampler = DistributedSampler(dataset)
     train_data = DataLoader(dataset, batch_size=args.batch_size, num_workers=8, pin_memory=True, drop_last=True, sampler=sampler)
     args.step_per_epoch = train_data.__len__()
-    dataset_val = VimeoDataset('validation')
+    dataset_val = VimeoDataset('validation', colab=colab, data_folder=data_folder)
     val_data = DataLoader(dataset_val, batch_size=16, pin_memory=True, num_workers=8)
     print('training...')
     time_stamp = time.time()
@@ -134,14 +134,18 @@ def evaluate(model, val_data, nr_eval, local_rank, writer_val):
         return
     writer_val.add_scalar('psnr', np.array(psnr_list).mean(), nr_eval)
     writer_val.add_scalar('psnr_teacher', np.array(psnr_list_teacher).mean(), nr_eval)
-        
-if __name__ == "__main__":    
+
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--epoch', default=300, type=int)
     parser.add_argument('--batch_size', default=16, type=int, help='minibatch size')
-    parser.add_argument('--local_rank', default=0, type=int, help='local rank')
-    parser.add_argument('--world_size', default=4, type=int, help='world size')
+    parser.add_argument('--local-rank', '--local_rank', default=0, type=int, help='local rank')
+    parser.add_argument('--world_size', default=1, type=int, help='world size')
+    parser.add_argument('--colab', action='store_true', help='train in colab')
+    parser.add_argument('--data_folder', default=None, type=str, help='data folder in colab')
     args = parser.parse_args()
+
     torch.distributed.init_process_group(backend="nccl", world_size=args.world_size)
     torch.cuda.set_device(args.local_rank)
     seed = 1234
@@ -151,5 +155,4 @@ if __name__ == "__main__":
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.benchmark = True
     model = Model(args.local_rank)
-    train(model, args.local_rank)
-        
+    train(model, args.local_rank, colab=args.colab, data_folder=args.data_folder)
