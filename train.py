@@ -14,7 +14,8 @@ from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data.distributed import DistributedSampler
 
-device = torch.device("cuda")
+# set a safe default; will be updated in __main__
+device = torch.device("cpu")
 
 log_path = 'train_log'
 
@@ -46,21 +47,35 @@ def train(model, local_rank, colab=False, data_folder=None):
     step = 0
     nr_eval = 0
     dataset = VimeoDataset('train', colab=colab, data_folder=data_folder)
-    sampler = DistributedSampler(dataset)
-    train_data = DataLoader(dataset, batch_size=args.batch_size, num_workers=8, pin_memory=True, drop_last=True, sampler=sampler)
+
+    # Use DistributedSampler only in distributed mode
+    is_distributed = dist.is_available() and dist.is_initialized()
+    if is_distributed:
+        sampler = DistributedSampler(dataset)
+        train_data = DataLoader(dataset, batch_size=args.batch_size, num_workers=8, pin_memory=(device.type == 'cuda'), drop_last=True, sampler=sampler)
+    else:
+        sampler = None
+        train_data = DataLoader(dataset, batch_size=args.batch_size, num_workers=8, pin_memory=(device.type == 'cuda'), drop_last=True, shuffle=True)
+
     args.step_per_epoch = train_data.__len__()
     dataset_val = VimeoDataset('validation', colab=colab, data_folder=data_folder)
-    val_data = DataLoader(dataset_val, batch_size=16, pin_memory=True, num_workers=8)
+    # validation loader doesn't need DistributedSampler for single-process or CPU mode
+    if is_distributed:
+        val_data = DataLoader(dataset_val, batch_size=16, pin_memory=(device.type == 'cuda'), num_workers=8)
+    else:
+        val_data = DataLoader(dataset_val, batch_size=16, pin_memory=(device.type == 'cuda'), num_workers=8)
+
     print('training...')
     time_stamp = time.time()
     for epoch in range(args.epoch):
-        sampler.set_epoch(epoch)
+        if sampler is not None:
+            sampler.set_epoch(epoch)
         for i, data in enumerate(train_data):
             data_time_interval = time.time() - time_stamp
             time_stamp = time.time()
             data_gpu, timestep = data
-            data_gpu = data_gpu.to(device, non_blocking=True) / 255.
-            timestep = timestep.to(device, non_blocking=True)
+            data_gpu = data_gpu.to(device, non_blocking=(device.type == 'cuda')) / 255.
+            timestep = timestep.to(device, non_blocking=(device.type == 'cuda'))
             imgs = data_gpu[:, :6]
             gt = data_gpu[:, 6:9]
             learning_rate = get_learning_rate(step) * args.world_size / 4
@@ -91,8 +106,10 @@ def train(model, local_rank, colab=False, data_folder=None):
         nr_eval += 1
         if nr_eval % 5 == 0:
             evaluate(model, val_data, step, local_rank, writer_val)
-        model.save_model(log_path, local_rank)    
-        dist.barrier()
+        model.save_model(log_path, local_rank)
+        # Only call dist.barrier in distributed mode
+        if is_distributed:
+            dist.barrier()
 
 def evaluate(model, val_data, nr_eval, local_rank, writer_val):
     loss_l1_list = []
@@ -146,13 +163,27 @@ if __name__ == "__main__":
     parser.add_argument('--data_folder', default=None, type=str, help='data folder in colab')
     args = parser.parse_args()
 
-    torch.distributed.init_process_group(backend="nccl", world_size=args.world_size)
-    torch.cuda.set_device(args.local_rank)
     seed = 1234
+    # Decide whether to use distributed mode and which backend
+    use_cuda = torch.cuda.is_available()
+    is_distributed_requested = args.world_size > 1
+    if is_distributed_requested:
+        backend = "nccl" if use_cuda else "gloo"
+        torch.distributed.init_process_group(backend=backend, world_size=args.world_size)
+    # Set device appropriately
+    if use_cuda:
+        # If using CUDA and distributed, local-rank should be set by launcher; otherwise default to 0
+        local_cuda_rank = args.local_rank if args.local_rank is not None else 0
+        torch.cuda.set_device(local_cuda_rank)
+        device = torch.device(f"cuda:{local_cuda_rank}")
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.benchmark = True
+    else:
+        device = torch.device("cpu")
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.benchmark = True
+
     model = Model(args.local_rank)
     train(model, args.local_rank, colab=args.colab, data_folder=args.data_folder)
