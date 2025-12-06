@@ -3,8 +3,9 @@
 *.py#
 
 *.pkl
-output/*
-train_log/*
+output/
+train_log/
+train_log_dino/
 *.mp4
 
 test/
@@ -12,3 +13,15 @@ test/
 *.npz
 
 *.zip
+
+# tensorboard data
+train/
+validate/
+
+# dataset
+vimeo_triplet/
+
+dinov3_checkpoint/
+
+.DS_store
+
