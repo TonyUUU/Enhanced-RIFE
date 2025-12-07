@@ -107,10 +107,11 @@ def train(model, local_rank):
         train_data = DataLoader(
             dataset,
             batch_size=args.batch_size,
-            num_workers=1,
+            num_workers=8,
             pin_memory=True,
             drop_last=True,
             sampler=sampler,
+            shuffle=True,
         )
 
     args.step_per_epoch = train_data.__len__()
@@ -125,7 +126,7 @@ def train(model, local_rank):
     )
     print("training...")
     time_stamp = time.time()
-    for epoch in range(args.epoch):
+    for epoch in range(args.start_epoch, args.epoch):
         if sampler is not None:
             sampler.set_epoch(epoch)
         for i, data in enumerate(train_data):
@@ -325,13 +326,13 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--lr_warmup",
-        default=6e-4,
+        default=8e-4,
         type=float,
         help="Learning rate for stage 1",
     )
     parser.add_argument(
         "--lr_finetune",
-        default=4e-5,
+        default=4e-4,
         type=float,
         help="Initial learning rate for stage 2 ",
     )
