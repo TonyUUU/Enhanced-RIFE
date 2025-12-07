@@ -8,10 +8,12 @@ from torch.utils.data import Dataset
 
 cv2.setNumThreads(1)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 class VimeoDataset(Dataset):
     def __init__(self, dataset_name, batch_size=32, colab=False, data_folder=None):
         self.batch_size = batch_size
-        self.dataset_name = dataset_name        
+        self.dataset_name = dataset_name
         self.h = 256
         self.w = 448
         self.data_root = 'vimeo_triplet' if not colab else f'/content/drive/MyDrive/{data_folder}/vimeo_triplet'
@@ -21,7 +23,7 @@ class VimeoDataset(Dataset):
         with open(train_fn, 'r') as f:
             self.trainlist = f.read().splitlines()
         with open(test_fn, 'r') as f:
-            self.testlist = f.read().splitlines()   
+            self.testlist = f.read().splitlines()
         self.load_data()
 
     def __len__(self):
@@ -35,14 +37,14 @@ class VimeoDataset(Dataset):
             self.meta_data = self.testlist
         else:
             self.meta_data = self.trainlist[cnt:]
-           
+
     def crop(self, img0, gt, img1, h, w):
         ih, iw, _ = img0.shape
         x = np.random.randint(0, ih - h + 1)
         y = np.random.randint(0, iw - w + 1)
-        img0 = img0[x:x+h, y:y+w, :]
-        img1 = img1[x:x+h, y:y+w, :]
-        gt = gt[x:x+h, y:y+w, :]
+        img0 = img0[x:x + h, y:y + w, :]
+        img1 = img1[x:x + h, y:y + w, :]
+        gt = gt[x:x + h, y:y + w, :]
         return img0, gt, img1
 
     def getimg(self, index):
@@ -55,7 +57,7 @@ class VimeoDataset(Dataset):
         img1 = cv2.imread(imgpaths[2])
         timestep = 0.5
         return img0, gt, img1, timestep
-    
+
         # RIFEm with Vimeo-Septuplet
         # imgpaths = [imgpath + '/im1.png', imgpath + '/im2.png', imgpath + '/im3.png', imgpath + '/im4.png', imgpath + '/im5.png', imgpath + '/im6.png', imgpath + '/im7.png']
         # ind = [0, 1, 2, 3, 4, 5, 6]
@@ -64,10 +66,10 @@ class VimeoDataset(Dataset):
         # ind.sort()
         # img0 = cv2.imread(imgpaths[ind[0]])
         # gt = cv2.imread(imgpaths[ind[1]])
-        # img1 = cv2.imread(imgpaths[ind[2]])        
+        # img1 = cv2.imread(imgpaths[ind[2]])
         # timestep = (ind[1] - ind[0]) * 1.0 / (ind[2] - ind[0] + 1e-6)
-            
-    def __getitem__(self, index):        
+
+    def __getitem__(self, index):
         img0, gt, img1, timestep = self.getimg(index)
         if self.dataset_name == 'train':
             img0, gt, img1 = self.crop(img0, gt, img1, 224, 224)
