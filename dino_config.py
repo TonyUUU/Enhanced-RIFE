@@ -19,6 +19,18 @@ class DinoConfig:
         "dinov3_checkpoint/dinov3_vits16_pretrain_lvd1689m-08c60483.pth"
     )
 
-    dino_loss_weight: float = 0.1
+    dino_loss_weight: float = 0.01
+    dcn_loss_weight: float = 0.001
+    offset_lr_mult: float = 0.25
     compressor_rank: int = 256
     interaction_indices: List[int] = field(default_factory=lambda: [8, 11])
+
+
+def main():
+    print(DinoConfig().dino_loss_weight)
+    print(DinoConfig().dcn_loss_weight)
+    print(DinoConfig().offset_lr_mult)
+
+
+if __name__ == "__main__":
+    main()

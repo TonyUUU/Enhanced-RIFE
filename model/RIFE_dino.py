@@ -38,7 +38,10 @@ class Model:
         self.optimG = AdamW(
             [
                 {"params": normal_params},
-                {"params": offset_params, "lr_mult": 0.1},
+                {
+                    "params": offset_params,
+                    "lr_mult": self.dino_cfg.offset_lr_mult,
+                },
             ],
             lr=1e-6,
             weight_decay=1e-3,
@@ -171,7 +174,7 @@ class Model:
                 + loss_tea
                 + loss_distill * 0.01
                 + loss_dino * self.dino_cfg.dino_loss_weight
-                + loss_dcn
+                + loss_dcn * self.dino_cfg.dcn_loss_weight
             )
             loss_G.backward()
             self.optimG.step()
@@ -187,5 +190,5 @@ class Model:
             "loss_tea": loss_tea,
             "loss_distill": loss_distill,
             "loss_dino": loss_dino * self.dino_cfg.dino_loss_weight,
-            "loss_dcn": loss_dcn,
+            "loss_dcn": loss_dcn * self.dino_cfg.dcn_loss_weight,
         }

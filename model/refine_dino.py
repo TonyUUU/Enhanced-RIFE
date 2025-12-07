@@ -29,6 +29,7 @@ def conv(
 
 
 def deconv(in_planes, out_planes, kernel_size=4, stride=2, padding=1):
+    # in_planes to out_planes, doubles the spatial resolution.
     return nn.Sequential(
         torch.nn.ConvTranspose2d(
             in_channels=in_planes,
