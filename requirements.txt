@@ -16,3 +16,6 @@ termcolor
 torchmetrics
 
 tensorboard
+
+# Evaluation
+lpips
