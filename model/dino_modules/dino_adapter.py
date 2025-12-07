@@ -50,8 +50,6 @@ def constant_init(module, val, bias=0):
 def init_fapm_weights(module):
     if isinstance(module, nn.Conv2d):
         kaiming_init(module)
-    elif isinstance(module, nn.BatchNorm2d):
-        constant_init(module, 1, 0)
 
 
 class SqueezeExcitation(nn.Module):
@@ -61,7 +59,7 @@ class SqueezeExcitation(nn.Module):
         self.pool = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Sequential(
             nn.Conv2d(channels, reduced, kernel_size=1, bias=True),
-            nn.ReLU(inplace=True),
+            nn.GELU(),
             nn.Conv2d(reduced, channels, kernel_size=1, bias=True),
             nn.Sigmoid(),
         )
@@ -79,16 +77,14 @@ class DepthwiseSeparableConv(nn.Module):
             kernel_size=kernel_size,
             padding=padding,
             groups=in_ch,
-            bias=False,
+            bias=True,
         )
-        self.pointwise = nn.Conv2d(in_ch, out_ch, kernel_size=1, bias=False)
-        self.bn = nn.BatchNorm2d(out_ch)
-        self.act = nn.ReLU(inplace=True)
+        self.pointwise = nn.Conv2d(in_ch, out_ch, kernel_size=1, bias=True)
+        self.act = nn.GELU()
 
     def forward(self, x):
         x = self.depthwise(x)
         x = self.pointwise(x)
-        x = self.bn(x)
         x = self.act(x)
         return x
 
@@ -103,10 +99,10 @@ class FAPM_Encoder(nn.Module):
         super().__init__()
 
         # --- Stage 1: Dual-branch feature extraction ---
-        self.shared_basis = nn.Conv2d(in_dim, rank, 1, bias=False)
+        self.shared_basis = nn.Conv2d(in_dim, rank, 1, bias=True)
         self.specific_bases = nn.ModuleList(
             [
-                nn.Conv2d(in_dim, rank, kernel_size=1, bias=False)
+                nn.Conv2d(in_dim, rank, kernel_size=1, bias=True)
                 for _ in range(num_layers)
             ]
         )
@@ -114,7 +110,7 @@ class FAPM_Encoder(nn.Module):
         # --- FiLM parameter generators ---
         self.film_generators = nn.ModuleList(
             [
-                nn.Conv2d(rank, rank * 2, kernel_size=1, bias=False)
+                nn.Conv2d(rank, rank * 2, kernel_size=1, bias=True)
                 for _ in range(num_layers)
             ]
         )
@@ -156,11 +152,10 @@ class FAPM_Refiner(nn.Module):
             # --- Refinement module backbone ---
             self.refinement_blocks.append(
                 nn.Sequential(
-                    nn.Conv2d(rank, oc, kernel_size=1, bias=False),
-                    nn.BatchNorm2d(oc),
-                    nn.ReLU(inplace=True),
+                    nn.Conv2d(rank, oc, kernel_size=1, bias=True),
+                    nn.GELU(),
                     DepthwiseSeparableConv(oc, oc),
-                    nn.Conv2d(oc, oc, kernel_size=1, bias=False),
+                    nn.Conv2d(oc, oc, kernel_size=1, bias=True),
                     SqueezeExcitation(oc),
                 )
             )
@@ -170,7 +165,7 @@ class FAPM_Refiner(nn.Module):
             #  need 1x1 conv to match dimensions
             if rank != oc:
                 self.shortcut_projections.append(
-                    nn.Conv2d(rank, oc, kernel_size=1, bias=False)
+                    nn.Conv2d(rank, oc, kernel_size=1, bias=True)
                 )
             else:
                 # If dimensions are the same, no operation needed
