@@ -2,6 +2,9 @@ import json
 import os
 import sys
 from datetime import datetime
+import shutil
+import sys
+import os
 
 sys.path.append(".")
 import cv2
@@ -13,7 +16,16 @@ import numpy as np
 from model.pytorch_msssim import ssim_matlab
 from model.RIFE_dino import Model
 import lpips
-from torchmetrics.image import MultiScaleStructuralSimilarityIndexMeasure as ms_ssim
+from torchmetrics.image import (
+    MultiScaleStructuralSimilarityIndexMeasure as ms_ssim,
+)
+from pytorch_fid import fid_score
+
+# git clone https://github.com/danier97/flolpips.git on benchmark
+current_dir = os.path.dirname(os.path.abspath(__file__))
+flolpips_path = os.path.join(current_dir, "flolpips")
+sys.path.append(flolpips_path)
+from flolpips import Flolpips
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -21,6 +33,7 @@ model = Model()
 model.load_model("train_log_dino")
 model.eval()
 model.device()
+flolpips_metric = Flolpips().to(device)
 
 if len(sys.argv) > 1:
     path = sys.argv[1]
@@ -33,6 +46,7 @@ ssim_list = []
 lpips_list = []
 mse_list = []
 ms_ssim_list = []
+flolpips_list = []
 
 # temporal metrics
 temporal_pixel_list = []
@@ -89,18 +103,26 @@ def compute_flow_cv2(frame_a, frame_b):
 def calculate_temporal_flow_consistency(gt_minus1, pred0, gt_plus1, gt0):
     # Temporal consistency based on optical flow (tOF-style).
     # forward motion flows
-    flow_gt_prev = compute_flow_cv2(gt_minus1, gt0)     # gt-1 -> gt0
+    flow_gt_prev = compute_flow_cv2(gt_minus1, gt0)  # gt-1 -> gt0
     flow_pred_prev = compute_flow_cv2(gt_minus1, pred0)  # gt-1 -> pred0
 
     # backward motion flows
-    flow_gt_next = compute_flow_cv2(gt0, gt_plus1)      # gt0 -> gt1
-    flow_pred_next = compute_flow_cv2(pred0, gt_plus1)   # pred0 -> gt1
+    flow_gt_next = compute_flow_cv2(gt0, gt_plus1)  # gt0 -> gt1
+    flow_pred_next = compute_flow_cv2(pred0, gt_plus1)  # pred0 -> gt1
 
     prev_diff = np.abs(flow_gt_prev - flow_pred_prev).mean()
     next_diff = np.abs(flow_gt_next - flow_pred_next).mean()
 
     return 0.5 * (prev_diff + next_diff)
 
+
+# --- Setup FID Folders ---
+fid_pred_dir = "fid_outputs_vimeo/pred"
+fid_gt_dir = "fid_outputs_vimeo/gt"
+if os.path.exists("fid_outputs_vimeo"):
+    shutil.rmtree("fid_outputs_vimeo")
+os.makedirs(fid_pred_dir, exist_ok=True)
+os.makedirs(fid_gt_dir, exist_ok=True)
 
 for i in f:
     name = str(i).strip()
@@ -137,6 +159,12 @@ for i in f:
     gt_rgb = gt_tensor.flip(1)
     lpips_val = loss_fn_alex(pred_rgb * 2 - 1, gt_rgb * 2 - 1).item()
     lpips_list.append(lpips_val)
+
+    # flolpips
+    flol_val = flolpips_metric(
+        gt_minus1, gt_plus1, pred_tensor, gt_tensor
+    ).item()
+    flolpips_list.append(flol_val)
 
     # PSNR
     mid_img = (
@@ -190,24 +218,44 @@ for i in f:
             np.mean(temporal_flow_list),
         )
     )
+    save_name = name.replace("/", "_") + ".png"
+    cv2.imwrite(
+        os.path.join(fid_pred_dir, save_name), (mid_img * 255).astype("uint8")
+    )
+    cv2.imwrite(
+        os.path.join(fid_gt_dir, save_name), (I1_norm * 255).astype("uint8")
+    )
+fid_value = fid_score.calculate_fid_given_paths(
+    paths=[fid_pred_dir, fid_gt_dir], batch_size=1, device=device, dims=2048
+)
 
 # Generate and store the final benchmark result
-os.makedirs('benchmark/result', exist_ok=True)
+os.makedirs("benchmark/result", exist_ok=True)
 
 result = {
-    'timestamp': datetime.now().isoformat(),
-    'num_samples': len(psnr_list),
-    'psnr_mean': float(np.mean(psnr_list)) if psnr_list else None,
-    'ssim_mean': float(np.mean(ssim_list)) if ssim_list else None,
-    'lpips_mean': float(np.mean(lpips_list)) if lpips_list else None,
-    'mse_mean': float(np.mean(mse_list)) if mse_list else None,
-    'ms_ssim_mean': float(np.mean(ms_ssim_list)) if ms_ssim_list else None,
-    'temporal_pixel_mean': float(np.mean(temporal_pixel_list)) if temporal_pixel_list else None,
-    'temporal_flow_mean': float(np.mean(temporal_flow_list)) if temporal_flow_list else None,
+    "timestamp": datetime.now().isoformat(),
+    "num_samples": len(psnr_list),
+    "psnr_mean": float(np.mean(psnr_list)) if psnr_list else None,
+    "ssim_mean": float(np.mean(ssim_list)) if ssim_list else None,
+    "lpips_mean": float(np.mean(lpips_list)) if lpips_list else None,
+    "mse_mean": float(np.mean(mse_list)) if mse_list else None,
+    "ms_ssim_mean": float(np.mean(ms_ssim_list)) if ms_ssim_list else None,
+    "temporal_pixel_mean": (
+        float(np.mean(temporal_pixel_list)) if temporal_pixel_list else None
+    ),
+    "temporal_flow_mean": (
+        float(np.mean(temporal_flow_list)) if temporal_flow_list else None
+    ),
+    "FID": fid_value,
+    "FloLPIPS": float(np.mean(flolpips_list)) if flolpips_list else None,
 }
 
-outfile = os.path.join('benchmark', 'result', f"vimeo90K_dino_result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
-with open(outfile, 'w') as fh:
+outfile = os.path.join(
+    "benchmark",
+    "result",
+    f"vimeo90K_dino_result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+)
+with open(outfile, "w") as fh:
     json.dump(result, fh, indent=2)
 
-print('Saved benchmark result to', outfile)
+print("Saved benchmark result to", outfile)

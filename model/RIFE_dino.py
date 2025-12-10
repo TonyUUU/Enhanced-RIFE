@@ -177,6 +177,7 @@ class Model:
                 + loss_dcn * self.dino_cfg.dcn_loss_weight
             )
             loss_G.backward()
+            torch.nn.utils.clip_grad_norm_(self.flownet.parameters(), 1.0)
             self.optimG.step()
         else:
             flow_teacher = flow[2]
