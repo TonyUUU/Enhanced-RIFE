@@ -170,8 +170,8 @@ class Model:
         if training:
             self.optimG.zero_grad()
             loss_G = (
-                loss_l1
-                + loss_tea
+                loss_l1 * self.dino_cfg.l1_loss
+                + loss_tea * self.dino_cfg.tea_loss
                 + loss_distill * 0.01
                 + loss_dino * self.dino_cfg.dino_loss_weight
                 + loss_dcn * self.dino_cfg.dcn_loss_weight
