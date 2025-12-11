@@ -19,3 +19,4 @@ tensorboard
 
 # Evaluation
 lpips
+fid_score
