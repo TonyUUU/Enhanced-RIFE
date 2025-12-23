@@ -16,6 +16,7 @@ from dataset_dino import VimeoDataset
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data.distributed import DistributedSampler
+import lpips
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -67,6 +68,15 @@ def to_np(tensor):
 
 def train(model, local_rank):
     log_dir = args.log_path
+
+    if local_rank == 0:
+        loss_fn_alex = lpips.LPIPS(net="alex").to(device)
+        loss_fn_alex.eval()
+        for param in loss_fn_alex.parameters():
+            param.requires_grad = False
+    else:
+        loss_fn_alex = None
+
     if local_rank == 0 and not os.path.exists(log_dir):
         os.makedirs(log_dir, exist_ok=True)
 
@@ -188,6 +198,16 @@ def train(model, local_rank):
                 writer.add_scalar("loss/distill", info["loss_distill"], step)
                 writer.add_scalar("loss/dino", info["loss_dino"], step)
                 writer.add_scalar("loss/dcn", info["loss_dcn"], step)
+                with torch.no_grad():
+                    # Normalize [0, 1] -> [-1, 1]
+                    train_pred_norm = (pred * 2) - 1
+                    train_gt_norm = (gt * 2) - 1
+                    train_lpips_val = (
+                        loss_fn_alex(train_pred_norm, train_gt_norm)
+                        .mean()
+                        .item()
+                    )
+                writer.add_scalar("train/lpips", train_lpips_val, step)
 
             if step % 1000 == 1 and local_rank == 0:
                 gt = to_np_img(gt)
@@ -233,19 +253,24 @@ def train(model, local_rank):
             step += 1
         nr_eval += 1
         if nr_eval % 5 == 0:
-            evaluate(model, val_data, step, local_rank, writer_val)
+            evaluate(
+                model, val_data, step, local_rank, writer_val, loss_fn_alex
+            )
         model.save_model(log_dir, local_rank)
         if args.world_size > 1:
             dist.barrier()
 
 
-def evaluate(model, val_data, nr_eval, local_rank, writer_val):
+def evaluate(
+    model, val_data, nr_eval, local_rank, writer_val, loss_fn_alex=None
+):
     loss_l1_list = []
     loss_distill_list = []
     loss_tea_list = []
     loss_dino_list = []
     psnr_list = []
     psnr_list_teacher = []
+    lpips_list = []
     for i, data in enumerate(val_data):
         data_gpu, _ = data
         data_gpu = data_gpu.to(device, non_blocking=True) / 255.0
@@ -273,6 +298,16 @@ def evaluate(model, val_data, nr_eval, local_rank, writer_val):
             )
             psnr = -10 * math.log10(mse_tea)
             psnr_list_teacher.append(psnr)
+            if loss_fn_alex is not None:
+                # Normalize from [0, 1] to [-1, 1] for LPIPS
+                pred_norm = (pred[j] * 2) - 1
+                gt_norm = (gt[j] * 2) - 1
+
+                # Calculate LPIPS (returns 1x1 tensor)
+                lpips_val = loss_fn_alex(
+                    pred_norm.unsqueeze(0), gt_norm.unsqueeze(0)
+                ).item()
+                lpips_list.append(lpips_val)
 
         gt = to_np_img(gt)
         pred = to_np_img(pred)
@@ -299,6 +334,8 @@ def evaluate(model, val_data, nr_eval, local_rank, writer_val):
     writer_val.add_scalar(
         "psnr_teacher", np.array(psnr_list_teacher).mean(), nr_eval
     )
+    if len(lpips_list) > 0:
+        writer_val.add_scalar("lpips", np.array(lpips_list).mean(), nr_eval)
 
 
 if __name__ == "__main__":

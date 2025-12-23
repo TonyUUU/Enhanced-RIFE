@@ -2,6 +2,10 @@
 # Xintao Wang, Kelvin C.K. Chan, Ke Yu, Chao Dong, Chen Change Loy
 # https://arxiv.org/abs/1905.02716
 
+# BasicVSR++: Improving Video Super-Resolution with Enhanced Propagation and Alignment
+# Kelvin C.K. Chan, Shangchen Zhou, Xiangyu Xu, Chen Change Loy
+# https://arxiv.org/abs/2104.13371
+
 # Restormer: Efficient Transformer for High-Resolution Image Restoration
 # Syed Waqas Zamir, Aditya Arora, Salman Khan,
 # Munawar Hayat, Fahad Shahbaz Khan, and Ming-Hsuan Yang
